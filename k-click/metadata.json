@@ -1,6 +1,0 @@
-{
-  "name": "K-Click",
-  "description": "Online photobooth, digital creative marketplace, creator studio, and photo strip editor.",
-  "requestFramePermissions": ["camera"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
