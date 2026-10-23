@@ -1,0 +1,91 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && 
+        firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+    }
+
+    function isApprovedProduct(productId) {
+      return firestore.get(/databases/(default)/documents/products/$(productId)).data.status == 'approved';
+    }
+
+    function isFreeAndApproved(productId) {
+      return firestore.get(/databases/(default)/documents/products/$(productId)).data.price == 0 &&
+             isApprovedProduct(productId);
+    }
+
+    function hasPurchased(productId) {
+      return firestore.exists(/databases/(default)/documents/purchases/$(request.auth.uid + '_' + productId));
+    }
+
+    // Default deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // User profile avatars
+    match /users/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isOwner(userId) && 
+                      request.resource.size < 5 * 1024 * 1024 &&
+                      request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');
+    }
+
+    // Photobooth gallery exports (strictly private to owner & admin)
+    match /gallery/{userId}/{allPaths=**} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) && request.resource.size < 20 * 1024 * 1024;
+    }
+
+    // Payment proof uploads (strictly owner and admin - never public)
+    match /payments/{userId}/{orderId}/{allPaths=**} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isOwner(userId) &&
+                      request.resource.size < 10 * 1024 * 1024 &&
+                      request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // Product preview thumbnails (public catalog, max 10MB)
+    // Unified path: previews/{creatorId}/{productId}/{allPaths=**}
+    match /previews/{creatorId}/{productId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if (isOwner(creatorId) || isAdmin()) && 
+                      request.resource.size < 10 * 1024 * 1024 &&
+                      request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');
+    }
+
+    // Master product files (templates & assets) - STRICT ACCESS:
+    // Only accessible if Creator/Owner, Admin, Free product that is strictly APPROVED, or valid Purchase Entitlement. NEVER PUBLIC.
+    // Unified paths: templates/{creatorId}/{productId}/{allPaths=**} or assets/{creatorId}/{productId}/{allPaths=**}
+    match /templates/{creatorId}/{productId}/{allPaths=**} {
+      allow read: if isSignedIn() && (
+        isOwner(creatorId) || 
+        isAdmin() ||
+        isFreeAndApproved(productId) ||
+        hasPurchased(productId)
+      );
+      allow write: if (isOwner(creatorId) || isAdmin()) && request.resource.size < 50 * 1024 * 1024;
+    }
+    match /assets/{creatorId}/{productId}/{allPaths=**} {
+      allow read: if isSignedIn() && (
+        isOwner(creatorId) || 
+        isAdmin() ||
+        isFreeAndApproved(productId) ||
+        hasPurchased(productId)
+      );
+      allow write: if (isOwner(creatorId) || isAdmin()) && request.resource.size < 50 * 1024 * 1024;
+    }
+  }
+}
